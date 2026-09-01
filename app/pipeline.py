@@ -66,11 +66,6 @@ def run_pipeline() -> dict:
             name = company["name"]
             sheet_row = company["sheet_row"]
 
-            # Skip already-completed companies
-            if company.get("status") == "completed":
-                results["companies_skipped"] += 1
-                continue
-
             try:
                 logger.info(f"Processing: {name}")
 
