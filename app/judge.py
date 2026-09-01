@@ -6,9 +6,9 @@ Produces: fit, confidence, follow-up question, and evidence-based reasoning (Tas
 import json
 import logging
 
-import google.generativeai as genai
+from groq import Groq
 
-from app.config import GEMINI_API_KEY, GEMINI_MODEL
+from app.config import GROQ_API_KEY, GROQ_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -57,16 +57,16 @@ def judge(company_name: str, signals: list[dict]) -> dict:
     Send enrichment signals to the LLM and get a structured verdict.
     Returns dict with fit, confidence, reasoning, follow_up_question.
     """
-    if not GEMINI_API_KEY:
-        logger.error("GEMINI_API_KEY is not set")
+    if not GROQ_API_KEY:
+        logger.error("GROQ_API_KEY is not set")
         return {
             "fit": "no_fit",
             "confidence": 0.0,
-            "reasoning": "LLM judge unavailable — GEMINI_API_KEY not configured.",
+            "reasoning": "LLM judge unavailable — GROQ_API_KEY not configured.",
             "follow_up_question": "N/A",
         }
 
-    genai.configure(api_key=GEMINI_API_KEY)
+    client = Groq(api_key=GROQ_API_KEY)
     
     signals_json = json.dumps(signals, indent=2, default=str)
     prompt = USER_PROMPT_TEMPLATE.format(
@@ -77,18 +77,18 @@ def judge(company_name: str, signals: list[dict]) -> dict:
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            model = genai.GenerativeModel(
-                GEMINI_MODEL,
-                system_instruction=SYSTEM_PROMPT,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.3,
-                    max_output_tokens=4096,
-                    response_mime_type="application/json",
-                ),
+            response = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=4096,
+                response_format={"type": "json_object"}
             )
 
-            response = model.generate_content(prompt)
-            content = response.text.strip()
+            content = response.choices[0].message.content.strip()
             
             # Strip markdown formatting if the model returns it
             if content.startswith("```json"):
