@@ -13,7 +13,7 @@ GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME", "Sheet1")
 
 # ── Groq LLM ─────────────────────────────────────────
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3-70b-8192")
 
 # ── Database ───────────────────────────────────────────────────
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/companies.db")
