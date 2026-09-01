@@ -1,0 +1,47 @@
+# Pipeline trigger — fires on schedule + manual dispatch (Task §8)
+# "A separate workflow should be able to kick the pipeline off on its own — no human clicking anything"
+name: Trigger Pipeline
+
+on:
+  # Manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for manual trigger"
+        required: false
+        default: "Manual run"
+
+  # Automatic schedule — every 6 hours
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger pipeline via API
+        run: |
+          echo "🚀 Triggering pipeline..."
+          echo "Reason: ${{ github.event.inputs.reason || 'Scheduled run' }}"
+
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ secrets.DEPLOYED_URL }}/api/run" \
+            -H "Content-Type: application/json")
+
+          echo "Response code: $RESPONSE"
+
+          if [ "$RESPONSE" = "200" ]; then
+            echo "✅ Pipeline triggered successfully"
+          elif [ "$RESPONSE" = "409" ]; then
+            echo "⚠️ Pipeline is already running"
+          else
+            echo "❌ Failed to trigger pipeline (HTTP $RESPONSE)"
+            exit 1
+          fi
+
+      - name: Check pipeline status
+        run: |
+          sleep 10
+          echo "📊 Checking status..."
+          curl -s "${{ secrets.DEPLOYED_URL }}/api/status" | python3 -m json.tool

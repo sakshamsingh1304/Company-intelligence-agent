@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Company Intelligence Agent — Automated company enrichment and LLM evaluation pipeline by LH2 AI Labs">
+    <title>Company Intelligence Agent | LH2 AI Labs</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- ── Header ──────────────────────────────────────────── -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <div class="logo-icon">⚡</div>
+                <div>
+                    <h1>Company Intelligence Agent</h1>
+                    <p class="subtitle">LH2 AI Labs · Automated Enrichment & LLM Evaluation Pipeline</p>
+                </div>
+            </div>
+            <button class="btn-primary" id="runPipelineBtn" onclick="triggerPipeline()">
+                <span class="btn-icon">▶</span> Run Pipeline
+            </button>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- ── Status Cards ────────────────────────────────── -->
+        <section class="stats-grid">
+            <div class="stat-card glass">
+                <div class="stat-icon blue">📊</div>
+                <div class="stat-info">
+                    <span class="stat-value">{{ stats.total }}</span>
+                    <span class="stat-label">Total Companies</span>
+                </div>
+            </div>
+            <div class="stat-card glass">
+                <div class="stat-icon green">✅</div>
+                <div class="stat-info">
+                    <span class="stat-value">{{ stats.processed }}</span>
+                    <span class="stat-label">Processed</span>
+                </div>
+            </div>
+            <div class="stat-card glass">
+                <div class="stat-icon amber">⏳</div>
+                <div class="stat-info">
+                    <span class="stat-value">{{ stats.pending }}</span>
+                    <span class="stat-label">Pending</span>
+                </div>
+            </div>
+            <div class="stat-card glass">
+                <div class="stat-icon red">❌</div>
+                <div class="stat-info">
+                    <span class="stat-value">{{ stats.errors }}</span>
+                    <span class="stat-label">Errors</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Pipeline Status ─────────────────────────────── -->
+        <section class="pipeline-status glass">
+            <h2>Pipeline Status</h2>
+            <div class="status-grid">
+                <div class="status-item">
+                    <span class="status-label">Status</span>
+                    <span class="status-value badge {% if pipeline_state.is_running %}badge-running{% elif pipeline_state.last_run_status == 'completed' %}badge-success{% elif pipeline_state.last_run_status == 'error' %}badge-error{% else %}badge-idle{% endif %}">
+                        {% if pipeline_state.is_running %}
+                            🔄 Running
+                        {% elif pipeline_state.last_run_status == 'completed' %}
+                            ✅ Completed
+                        {% elif pipeline_state.last_run_status == 'error' %}
+                            ❌ Error
+                        {% else %}
+                            💤 Idle
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Last Run</span>
+                    <span class="status-value">{{ pipeline_state.last_run_at or 'Never' }}</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Next Scheduled</span>
+                    <span class="status-value">{{ next_run or 'N/A' }}</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Notification Banner ─────────────────────────── -->
+        <div id="notification" class="notification hidden">
+            <span id="notificationText"></span>
+            <button class="notification-close" onclick="hideNotification()">✕</button>
+        </div>
+
+        <!-- ── Companies Table ─────────────────────────────── -->
+        <section class="table-section glass">
+            <div class="table-header">
+                <h2>Companies & Verdicts</h2>
+                <span class="table-count">{{ companies | length }} companies</span>
+            </div>
+
+            {% if companies %}
+            <div class="table-wrapper">
+                <table id="companiesTable">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Company</th>
+                            <th>Status</th>
+                            <th>Fit</th>
+                            <th>Confidence</th>
+                            <th>Reasoning</th>
+                            <th>Follow-up Question</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for c in companies %}
+                        <tr class="table-row">
+                            <td class="cell-index">{{ loop.index }}</td>
+                            <td class="cell-name">{{ c.name }}</td>
+                            <td>
+                                <span class="badge {% if c.status == 'completed' %}badge-success{% elif c.status == 'pending' %}badge-idle{% elif c.status == 'enriching' or c.status == 'enriched' %}badge-running{% else %}badge-error{% endif %}">
+                                    {{ c.status or 'pending' }}
+                                </span>
+                            </td>
+                            <td>
+                                {% if c.fit %}
+                                <span class="fit-badge fit-{{ c.fit }}">
+                                    {{ c.fit | replace('_', ' ') | title }}
+                                </span>
+                                {% else %}
+                                <span class="fit-badge fit-pending">—</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if c.confidence is not none and c.confidence is not none %}
+                                <div class="confidence-bar">
+                                    <div class="confidence-fill" style="width: {{ (c.confidence * 100) | round }}%"></div>
+                                    <span class="confidence-text">{{ (c.confidence * 100) | round }}%</span>
+                                </div>
+                                {% else %}
+                                <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td class="cell-reasoning">{{ c.reasoning[:500] + '...' if c.reasoning and c.reasoning|length > 500 else c.reasoning or '—' }}</td>
+                            <td class="cell-question">{{ c.follow_up_question or '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">🏢</div>
+                <h3>No companies yet</h3>
+                <p>Add companies to your Google Sheet and run the pipeline to see results here.</p>
+            </div>
+            {% endif %}
+        </section>
+
+        <!-- ── API Reference ───────────────────────────────── -->
+        <section class="api-section glass">
+            <h2>API Endpoints</h2>
+            <div class="api-grid">
+                <div class="api-card">
+                    <span class="method post">POST</span>
+                    <code>/api/run</code>
+                    <span class="api-desc">Trigger pipeline</span>
+                </div>
+                <div class="api-card">
+                    <span class="method get">GET</span>
+                    <code>/api/status</code>
+                    <span class="api-desc">Pipeline status</span>
+                </div>
+                <div class="api-card">
+                    <span class="method get">GET</span>
+                    <code>/api/companies</code>
+                    <span class="api-desc">All companies</span>
+                </div>
+                <div class="api-card">
+                    <span class="method get">GET</span>
+                    <code>/api/companies/{name}</code>
+                    <span class="api-desc">Single company</span>
+                </div>
+                <div class="api-card">
+                    <span class="method get">GET</span>
+                    <code>/health</code>
+                    <span class="api-desc">Health check</span>
+                </div>
+                <div class="api-card">
+                    <span class="method get">GET</span>
+                    <code>/docs</code>
+                    <span class="api-desc">Swagger UI</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ── Footer ──────────────────────────────────────────── -->
+    <footer class="footer">
+        <p>Built for LH2 AI Labs · Founder's Office — Automation Intern Task</p>
+    </footer>
+
+    <script>
+        async function triggerPipeline() {
+            const btn = document.getElementById('runPipelineBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-icon spinner">⟳</span> Running...';
+            btn.classList.add('btn-running');
+
+            try {
+                const resp = await fetch('/api/run', { method: 'POST' });
+                const data = await resp.json();
+
+                if (resp.status === 409) {
+                    showNotification('Pipeline is already running!', 'warning');
+                    pollStatus();
+                } else {
+                    showNotification('Pipeline started! Dashboard will update automatically when finished.', 'success');
+                    pollStatus();
+                }
+            } catch (err) {
+                showNotification('Failed to trigger pipeline: ' + err.message, 'error');
+                btn.disabled = false;
+                btn.innerHTML = '<span class="btn-icon">▶</span> Run Pipeline';
+                btn.classList.remove('btn-running');
+            }
+        }
+
+        async function pollStatus() {
+            try {
+                const resp = await fetch('/api/status');
+                const data = await resp.json();
+                if (!data.pipeline.is_running) {
+                    location.reload();
+                } else {
+                    setTimeout(pollStatus, 3000);
+                }
+            } catch (err) {
+                setTimeout(pollStatus, 5000);
+            }
+        }
+
+        function showNotification(text, type) {
+            const el = document.getElementById('notification');
+            const textEl = document.getElementById('notificationText');
+            el.className = 'notification notification-' + type;
+            textEl.textContent = text;
+            el.classList.remove('hidden');
+            setTimeout(() => hideNotification(), 8000);
+        }
+
+        function hideNotification() {
+            document.getElementById('notification').classList.add('hidden');
+        }
+
+        // Auto-refresh every 3s if pipeline is running on initial load
+        {% if pipeline_state.is_running %}
+        setTimeout(pollStatus, 3000);
+        {% endif %}
+    </script>
+</body>
+</html>
