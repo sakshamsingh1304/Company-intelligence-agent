@@ -66,62 +66,70 @@ def judge(company_name: str, signals: list[dict]) -> dict:
             "follow_up_question": "N/A",
         }
 
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            GEMINI_MODEL,
-            system_instruction=SYSTEM_PROMPT,
-            generation_config=genai.GenerationConfig(
-                temperature=0.3,
-                max_output_tokens=4096,
-                response_mime_type="application/json",
-            ),
-        )
+    genai.configure(api_key=GEMINI_API_KEY)
+    
+    signals_json = json.dumps(signals, indent=2, default=str)
+    prompt = USER_PROMPT_TEMPLATE.format(
+        company_name=company_name,
+        signals_json=signals_json,
+    )
 
-        signals_json = json.dumps(signals, indent=2, default=str)
-
-        response = model.generate_content(
-            USER_PROMPT_TEMPLATE.format(
-                company_name=company_name,
-                signals_json=signals_json,
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            model = genai.GenerativeModel(
+                GEMINI_MODEL,
+                system_instruction=SYSTEM_PROMPT,
+                generation_config=genai.GenerationConfig(
+                    temperature=0.3,
+                    max_output_tokens=4096,
+                    response_mime_type="application/json",
+                ),
             )
-        )
 
-        content = response.text.strip()
-        
-        # Strip markdown formatting if the model returns it
-        if content.startswith("```json"):
-            content = content[7:]
-        elif content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
+            response = model.generate_content(prompt)
+            content = response.text.strip()
             
-        verdict = json.loads(content.strip())
+            # Strip markdown formatting if the model returns it
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+                
+            verdict = json.loads(content.strip())
 
-        # Validate required fields
-        required = ["fit", "confidence", "reasoning", "follow_up_question"]
-        for field in required:
-            if field not in verdict:
-                verdict[field] = "N/A" if field != "confidence" else 0.0
+            # Validate required fields
+            required = ["fit", "confidence", "reasoning", "follow_up_question"]
+            for field in required:
+                if field not in verdict:
+                    verdict[field] = "N/A" if field != "confidence" else 0.0
 
-        # Clamp confidence
-        verdict["confidence"] = max(0.0, min(1.0, float(verdict["confidence"])))
+            # Clamp confidence
+            verdict["confidence"] = max(0.0, min(1.0, float(verdict["confidence"])))
 
-        # Validate fit value
-        valid_fits = {"strong_fit", "moderate_fit", "weak_fit", "no_fit"}
-        if verdict["fit"] not in valid_fits:
-            verdict["fit"] = "weak_fit"
+            # Validate fit value
+            valid_fits = {"strong_fit", "moderate_fit", "weak_fit", "no_fit"}
+            if verdict["fit"] not in valid_fits:
+                verdict["fit"] = "weak_fit"
 
-        logger.info(f"LLM verdict for {company_name}: {verdict['fit']} "
-                     f"(confidence: {verdict['confidence']})")
-        return verdict
+            logger.info(f"LLM verdict for {company_name}: {verdict['fit']} "
+                         f"(confidence: {verdict['confidence']})")
+            return verdict
 
-    except Exception as e:
-        logger.error(f"LLM judge failed for {company_name}: {e}")
-        return {
-            "fit": "no_fit",
-            "confidence": 0.0,
-            "reasoning": f"LLM judge error: {str(e)}",
-            "follow_up_question": "N/A",
-        }
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str and attempt < max_retries - 1:
+                logger.warning(f"Rate limit hit (429) for {company_name}. Retrying in 15s... (Attempt {attempt+1}/{max_retries})")
+                import time
+                time.sleep(15)
+                continue
+                
+            logger.error(f"LLM judge failed for {company_name}: {e}")
+            return {
+                "fit": "no_fit",
+                "confidence": 0.0,
+                "reasoning": f"LLM judge error: {e}",
+                "follow_up_question": "N/A",
+            }
