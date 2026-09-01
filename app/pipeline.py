@@ -67,10 +67,9 @@ def run_pipeline() -> dict:
             return results
 
         # ── Step 2–5: Process each company ─────────────────────
-        for company in sheet_companies:
+        def process_company(company):
             name = company["name"]
             sheet_row = company["sheet_row"]
-
             try:
                 logger.info(f"Processing: {name}")
 
@@ -91,7 +90,6 @@ def run_pipeline() -> dict:
                         return data
                     except Exception as e:
                         logger.error(f"    Wikipedia failed: {e}")
-                        results["errors"].append(f"Wikipedia({name}): {str(e)}")
                         return None
 
                 def fetch_github():
@@ -102,7 +100,6 @@ def run_pipeline() -> dict:
                         return data
                     except Exception as e:
                         logger.error(f"    GitHub failed: {e}")
-                        results["errors"].append(f"GitHub({name}): {str(e)}")
                         return None
 
                 def fetch_browser():
@@ -113,7 +110,6 @@ def run_pipeline() -> dict:
                         return data
                     except Exception as e:
                         logger.error(f"    Browser failed: {e}")
-                        results["errors"].append(f"Browser({name}): {str(e)}")
                         return None
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
@@ -158,21 +154,31 @@ def run_pipeline() -> dict:
                     )
 
                     db.update_company_status(company_id, "completed")
-                    results["companies_processed"] += 1
                     logger.info(f"  ✓ Done: {name} → {verdict['fit']}")
+                    return True, None
                 else:
                     db.update_company_status(company_id, "error")
                     sheets.sync_status(sheet_row, "error - no signals")
-                    results["errors"].append(f"No signals collected for {name}")
+                    return False, f"No signals collected for {name}"
 
             except Exception as e:
                 logger.error(f"Failed to process {name}: {e}")
-                results["errors"].append(f"{name}: {str(e)}")
                 try:
                     db.update_company_status(company_id, "error")
                     sheets.sync_status(sheet_row, "error")
                 except Exception:
                     pass
+                return False, f"{name}: {str(e)}"
+
+        # Process up to 5 companies concurrently to maximize throughput
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(process_company, c) for c in sheet_companies]
+            for future in concurrent.futures.as_completed(futures):
+                success, error_msg = future.result()
+                if success:
+                    results["companies_processed"] += 1
+                else:
+                    results["errors"].append(error_msg)
 
         results["status"] = "completed"
         results["finished_at"] = datetime.now(timezone.utc).isoformat()

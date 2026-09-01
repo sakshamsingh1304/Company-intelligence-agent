@@ -12,10 +12,12 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import threading
 
 logger = logging.getLogger(__name__)
 
 _GLOBAL_DRIVER = None
+_BROWSER_LOCK = threading.Lock()
 
 def init_driver():
     """Initialize the global WebDriver instance."""
@@ -76,40 +78,41 @@ def enrich(company_name: str) -> dict:
         query = f"{company_name} company overview"
         url = f"https://html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
 
-        logger.info(f"Browser automation: navigating to DuckDuckGo for '{company_name}'")
-        _GLOBAL_DRIVER.get(url)
+        with _BROWSER_LOCK:
+            logger.info(f"Browser automation: navigating to DuckDuckGo for '{company_name}'")
+            _GLOBAL_DRIVER.get(url)
 
-        # Wait for search results to load
-        WebDriverWait(_GLOBAL_DRIVER, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".result"))
-        )
+            # Wait for search results to load
+            WebDriverWait(_GLOBAL_DRIVER, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, ".result"))
+            )
 
-        results = []
-        elements = _GLOBAL_DRIVER.find_elements(By.CSS_SELECTOR, ".result")[:5]
+            results = []
+            elements = _GLOBAL_DRIVER.find_elements(By.CSS_SELECTOR, ".result")[:5]
 
-        for el in elements:
-            try:
-                title_el = el.find_element(By.CSS_SELECTOR, ".result__a")
-                title = title_el.text.strip()
-                link = title_el.get_attribute("href") or ""
-
+            for el in elements:
                 try:
-                    snippet_el = el.find_element(By.CSS_SELECTOR, ".result__snippet")
-                    snippet = snippet_el.text.strip()
+                    title_el = el.find_element(By.CSS_SELECTOR, ".result__a")
+                    title = title_el.text.strip()
+                    link = title_el.get_attribute("href") or ""
+
+                    try:
+                        snippet_el = el.find_element(By.CSS_SELECTOR, ".result__snippet")
+                        snippet = snippet_el.text.strip()
+                    except Exception:
+                        snippet = ""
+
+                    if title:
+                        results.append({
+                            "title": title,
+                            "snippet": snippet[:300],
+                            "link": link,
+                        })
                 except Exception:
-                    snippet = ""
+                    continue
 
-                if title:
-                    results.append({
-                        "title": title,
-                        "snippet": snippet[:300],
-                        "link": link,
-                    })
-            except Exception:
-                continue
-
-        # Try to extract page title
-        page_title = _GLOBAL_DRIVER.title
+            # Try to extract page title
+            page_title = _GLOBAL_DRIVER.title
 
         return {
             "source": "duckduckgo_browser",
