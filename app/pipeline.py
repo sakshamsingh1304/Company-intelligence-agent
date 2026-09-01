@@ -3,6 +3,7 @@ Pipeline orchestrator — the single end-to-end flow.
 Source → Enrich → Persist → Judge → Sync back (Task §1–§5).
 """
 import logging
+import concurrent.futures
 from datetime import datetime, timezone
 
 from app import database as db
@@ -46,6 +47,10 @@ def run_pipeline() -> dict:
     }
 
     try:
+        # Initialize browser driver once for the entire pipeline run
+        logger.info("Initializing Selenium WebDriver...")
+        browser.init_driver()
+
         # ── Step 1: Source — fetch companies from Sheet ────────
         logger.info("Pipeline Step 1: Sourcing companies from Google Sheet")
         try:
@@ -78,35 +83,49 @@ def run_pipeline() -> dict:
                 logger.info(f"  Enriching: {name}")
                 signals = []
 
-                # Signal 1: Wikipedia (HTTP)
-                try:
-                    wiki_data = wikipedia.enrich(name)
-                    db.save_enrichment(company_id, "wikipedia", wiki_data)
-                    signals.append(wiki_data)
-                    logger.info(f"    Wikipedia: {'found' if wiki_data.get('found') else 'not found'}")
-                except Exception as e:
-                    logger.error(f"    Wikipedia failed: {e}")
-                    results["errors"].append(f"Wikipedia({name}): {str(e)}")
+                def fetch_wikipedia():
+                    try:
+                        data = wikipedia.enrich(name)
+                        db.save_enrichment(company_id, "wikipedia", data)
+                        logger.info(f"    Wikipedia: {'found' if data.get('found') else 'not found'}")
+                        return data
+                    except Exception as e:
+                        logger.error(f"    Wikipedia failed: {e}")
+                        results["errors"].append(f"Wikipedia({name}): {str(e)}")
+                        return None
 
-                # Signal 2: GitHub (HTTP)
-                try:
-                    github_data = github_search.enrich(name)
-                    db.save_enrichment(company_id, "github", github_data)
-                    signals.append(github_data)
-                    logger.info(f"    GitHub: {github_data.get('total_repos_found', 0)} repos")
-                except Exception as e:
-                    logger.error(f"    GitHub failed: {e}")
-                    results["errors"].append(f"GitHub({name}): {str(e)}")
+                def fetch_github():
+                    try:
+                        data = github_search.enrich(name)
+                        db.save_enrichment(company_id, "github", data)
+                        logger.info(f"    GitHub: {data.get('total_repos_found', 0)} repos")
+                        return data
+                    except Exception as e:
+                        logger.error(f"    GitHub failed: {e}")
+                        results["errors"].append(f"GitHub({name}): {str(e)}")
+                        return None
 
-                # Signal 3: Browser automation (Selenium)
-                try:
-                    browser_data = browser.enrich(name)
-                    db.save_enrichment(company_id, "browser", browser_data)
-                    signals.append(browser_data)
-                    logger.info(f"    Browser: {browser_data.get('results_count', 0)} results")
-                except Exception as e:
-                    logger.error(f"    Browser failed: {e}")
-                    results["errors"].append(f"Browser({name}): {str(e)}")
+                def fetch_browser():
+                    try:
+                        data = browser.enrich(name)
+                        db.save_enrichment(company_id, "browser", data)
+                        logger.info(f"    Browser: {data.get('results_count', 0)} results")
+                        return data
+                    except Exception as e:
+                        logger.error(f"    Browser failed: {e}")
+                        results["errors"].append(f"Browser({name}): {str(e)}")
+                        return None
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    future_to_enrichment = {
+                        executor.submit(fetch_wikipedia): "wikipedia",
+                        executor.submit(fetch_github): "github",
+                        executor.submit(fetch_browser): "browser"
+                    }
+                    for future in concurrent.futures.as_completed(future_to_enrichment):
+                        res = future.result()
+                        if res:
+                            signals.append(res)
 
                 db.update_company_status(company_id, "enriched")
 
@@ -164,6 +183,7 @@ def run_pipeline() -> dict:
         results["errors"].append(str(e))
 
     finally:
+        browser.quit_driver()
         pipeline_state["is_running"] = False
         pipeline_state["last_run_status"] = results.get("status", "unknown")
         pipeline_state["last_run_details"] = results

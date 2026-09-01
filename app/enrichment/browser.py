@@ -15,6 +15,23 @@ from selenium.webdriver.support import expected_conditions as EC
 
 logger = logging.getLogger(__name__)
 
+_GLOBAL_DRIVER = None
+
+def init_driver():
+    """Initialize the global WebDriver instance."""
+    global _GLOBAL_DRIVER
+    if not _GLOBAL_DRIVER:
+        _GLOBAL_DRIVER = _get_driver()
+
+def quit_driver():
+    """Quit the global WebDriver instance."""
+    global _GLOBAL_DRIVER
+    if _GLOBAL_DRIVER:
+        try:
+            _GLOBAL_DRIVER.quit()
+        except Exception:
+            pass
+        _GLOBAL_DRIVER = None
 
 def _get_driver() -> webdriver.Chrome:
     """Configure and return a headless Chrome WebDriver."""
@@ -51,22 +68,24 @@ def enrich(company_name: str) -> dict:
     Use a real browser to search DuckDuckGo and scrape results.
     Extracts top search snippets, URLs, and inferred metadata.
     """
-    driver = None
+    global _GLOBAL_DRIVER
+    if not _GLOBAL_DRIVER:
+        init_driver()
+
     try:
-        driver = _get_driver()
         query = f"{company_name} company overview"
         url = f"https://html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
 
         logger.info(f"Browser automation: navigating to DuckDuckGo for '{company_name}'")
-        driver.get(url)
+        _GLOBAL_DRIVER.get(url)
 
         # Wait for search results to load
-        WebDriverWait(driver, 15).until(
+        WebDriverWait(_GLOBAL_DRIVER, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".result"))
         )
 
         results = []
-        elements = driver.find_elements(By.CSS_SELECTOR, ".result")[:5]
+        elements = _GLOBAL_DRIVER.find_elements(By.CSS_SELECTOR, ".result")[:5]
 
         for el in elements:
             try:
@@ -90,7 +109,7 @@ def enrich(company_name: str) -> dict:
                 continue
 
         # Try to extract page title
-        page_title = driver.title
+        page_title = _GLOBAL_DRIVER.title
 
         return {
             "source": "duckduckgo_browser",
@@ -110,9 +129,3 @@ def enrich(company_name: str) -> dict:
             "found": False,
             "error": str(e),
         }
-    finally:
-        if driver:
-            try:
-                driver.quit()
-            except Exception:
-                pass
